@@ -8,10 +8,11 @@ import (
 	"strings"
 
 	"judger/logisim"
+	"judger/verilog"
 )
 
 func main() {
-	mode := flag.String("mode", "", "mode: logisim")
+	mode := flag.String("mode", "", "mode: logisim,verilog")
 	flag.Parse()
 
 	args := flag.Args()
@@ -51,8 +52,33 @@ func main() {
 		}
 		fmt.Println("Mismatch found. See output and detail.log for details.")
 		os.Exit(1)
+	} else if *mode == "verilog" {
+		if len(args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: judger -mode verilog <ise_path> <verilog_path> <hex_path> <output_path>")
+			os.Exit(2)
+		}
+		ise := args[0]
+		vfile := args[1]
+		hex := args[2]
+		out := args[3]
+
+		res, err := verilog.JudgeVerilog(ise, vfile, hex)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Judge error:", err)
+			os.Exit(1)
+		}
+		if err := os.WriteFile(out, []byte(strings.Join(res.Diffs, "\n")+"\n"), 0644); err != nil {
+			fmt.Fprintln(os.Stderr, "write output error:", err)
+			os.Exit(1)
+		}
+		if res.OK {
+			fmt.Println("All lines OK")
+			os.Exit(0)
+		}
+		fmt.Println("Mismatch found. See output for details.")
+		os.Exit(1)
 	}
 
-	fmt.Fprintln(os.Stderr, "Unknown or missing -mode. Use -mode logisim")
+	fmt.Fprintln(os.Stderr, "Unknown or missing -mode. Use -mode logisim or -mode verilog")
 	os.Exit(2)
 }
