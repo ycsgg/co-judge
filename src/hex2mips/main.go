@@ -144,7 +144,7 @@ func main() {
 				continue
 			}
 			asm := disassembler.DecodeWord(word, pc)
-			fmt.Printf("0x%08x\t%s\n", word, asm)
+			fmt.Printf("0x%08x: 0x%08x\t%s\n", pc, word, asm)
 			pc += 4
 		}
 	}

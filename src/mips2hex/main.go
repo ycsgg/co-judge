@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 
 	"mips2hex/assembler"
 	"mips2hex/emitter"
@@ -13,6 +14,7 @@ import (
 func main() {
 	inPath := flag.String("input", "", "输入 MIPS asm 文件路径")
 	outPath := flag.String("output", "", "输出 hex 文件路径")
+	baseStr := flag.String("base", "0", ".text 段基址(0x前缀十六进制),用于分支/跳转计算")
 	flag.Parse()
 
 	if *inPath == "" || *outPath == "" {
@@ -26,13 +28,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 解析基址
+	baseVal, err := strconv.ParseUint(*baseStr, 16, 32)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "解析 base 失败:", err)
+		os.Exit(2)
+	}
+
 	items, labels, err := parser.ParseLines(lines)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "解析失败:", err)
 		os.Exit(1)
 	}
 
-	words, err := assembler.Assemble(items, labels)
+	words, err := assembler.Assemble(items, labels, uint32(baseVal))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "汇编失败:", err)
 		os.Exit(1)

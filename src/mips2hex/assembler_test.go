@@ -53,7 +53,7 @@ func TestEndToEndAssembler(t *testing.T) {
 				t.Fatalf("解析文件 %s 失败: %v", inputPath, err)
 			}
 
-			machineCode, err := assembler.Assemble(items, labels)
+			machineCode, err := assembler.Assemble(items, labels, 0x00003000)
 			if err != nil {
 				t.Fatalf("汇编文件 %s 失败: %v", inputPath, err)
 			}

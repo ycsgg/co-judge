@@ -6,11 +6,12 @@ import (
 )
 
 type CPU struct {
-	PC     uint32
-	Regs   [32]uint32
-	Mem    map[uint32]uint32
-	Hi, Lo uint32
-	NextPC uint32
+	PC       uint32
+	Regs     [32]uint32
+	Mem      map[uint32]uint32
+	Hi, Lo   uint32
+	NextPC   uint32
+	MaxSteps int // 最大执行步数限制，防止死循环
 }
 
 type ExecResult struct {
@@ -23,7 +24,7 @@ type ExecResult struct {
 }
 
 func New() *CPU {
-	return &CPU{PC: 0x3000, Regs: [32]uint32{}, Mem: make(map[uint32]uint32)}
+	return &CPU{PC: 0x3000, Regs: [32]uint32{}, Mem: make(map[uint32]uint32), MaxSteps: 10000}
 }
 
 func signExtend16(x uint32) uint32 {
@@ -38,10 +39,12 @@ func (c *CPU) Run(instrs []uint32) {
 	for i, w := range instrs {
 		c.Mem[base+uint32(i*4)] = w
 	}
-	step := 1
-	for {
+	for step := 1; ; step++ {
+		if step > c.MaxSteps {
+			fmt.Printf("达到最大步数限制 %d，仿真终止。\n", c.MaxSteps)
+			break
+		}
 		fmt.Printf("=== Step %d ===\n", step)
-		step++
 		idx := (c.PC - base) / 4
 		if idx >= uint32(len(instrs)) {
 			break

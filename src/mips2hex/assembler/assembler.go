@@ -66,14 +66,14 @@ var instrTable = map[string]types.Instruction{
 }
 
 // Assemble: 将解析出来的 items 与 label 表翻译为机器码 uint32 列表
-func Assemble(items []types.Item, labels map[string]uint32) ([]uint32, error) {
+func Assemble(items []types.Item, labels map[string]uint32, base uint32) ([]uint32, error) {
 	var out []uint32
 	addr := uint32(0)
 
 	for _, it := range items {
 		switch it.Kind {
 		case types.Word:
-			v, err := parseNumber(it.Raw, labels)
+			v, err := parseNumber(it.Raw, labels, base)
 			if err != nil {
 				return nil, fmt.Errorf("line %d: 解析 .word %s 失败: %v", it.LineNo, it.Raw, err)
 			}
@@ -94,11 +94,11 @@ func Assemble(items []types.Item, labels map[string]uint32) ([]uint32, error) {
 			case types.RType:
 				words, err = assembleRType(it, instr)
 			case types.IType:
-				words, err = assembleIType(it, instr, labels, addr)
+				words, err = assembleIType(it, instr, labels, addr, base)
 			case types.JType:
-				words, err = assembleJType(it, instr, labels)
+				words, err = assembleJType(it, instr, labels, base)
 			case types.Special:
-				words, err = assembleSpecial(it, labels)
+				words, err = assembleSpecial(it, labels, base)
 			default:
 				err = fmt.Errorf("line %d: 未知指令类型 for %s", it.LineNo, op)
 			}
@@ -194,7 +194,7 @@ func assembleRType(it types.Item, instr types.Instruction) ([]uint32, error) {
 	return []uint32{word}, nil
 }
 
-func assembleIType(it types.Item, instr types.Instruction, labels map[string]uint32, addr uint32) ([]uint32, error) {
+func assembleIType(it types.Item, instr types.Instruction, labels map[string]uint32, addr uint32, base uint32) ([]uint32, error) {
 	toks := it.Tokens
 	op := strings.ToLower(toks[0])
 	var word uint32
@@ -207,7 +207,7 @@ func assembleIType(it types.Item, instr types.Instruction, labels map[string]uin
 		}
 		rt := regs.RegOf(toks[1], it.LineNo)
 		rs := regs.RegOf(toks[2], it.LineNo)
-		imm, err := parseNumber(toks[3], labels)
+		imm, err := parseNumber(toks[3], labels, base)
 		if err != nil {
 			return nil, fmt.Errorf("line %d: 解析立即数失败: %v", it.LineNo, err)
 		}
@@ -218,7 +218,7 @@ func assembleIType(it types.Item, instr types.Instruction, labels map[string]uin
 			return nil, fmt.Errorf("line %d: lui 需要 reg, imm", it.LineNo)
 		}
 		rt := regs.RegOf(toks[1], it.LineNo)
-		imm, err := parseNumber(toks[2], labels)
+		imm, err := parseNumber(toks[2], labels, base)
 		if err != nil {
 			return nil, fmt.Errorf("line %d: lui 立即数解析失败: %v", it.LineNo, err)
 		}
@@ -229,11 +229,11 @@ func assembleIType(it types.Item, instr types.Instruction, labels map[string]uin
 			return nil, fmt.Errorf("line %d: %s 需要 2 个操作数", it.LineNo, op)
 		}
 		rt := regs.RegOf(toks[1], it.LineNo)
-		off, base, err := parseOffsetBase(toks[2], labels)
+		off, baseReg, err := parseOffsetBase(toks[2], labels, base)
 		if err != nil {
 			return nil, fmt.Errorf("line %d: 解析 offset(base) 失败: %v", it.LineNo, err)
 		}
-		word = (instr.Opcode << 26) | (uint32(base) << 21) | (uint32(rt) << 16) | (uint32(off) & 0xffff)
+		word = (instr.Opcode << 26) | (uint32(baseReg) << 21) | (uint32(rt) << 16) | (uint32(off) & 0xffff)
 	// Format: op rs, rt, label
 	case "beq", "bne":
 		if len(toks) < 4 {
@@ -241,7 +241,7 @@ func assembleIType(it types.Item, instr types.Instruction, labels map[string]uin
 		}
 		rs := regs.RegOf(toks[1], it.LineNo)
 		rt := regs.RegOf(toks[2], it.LineNo)
-		off, err := branchOffset(toks[3], labels, addr)
+		off, err := branchOffset(toks[3], labels, addr, base)
 		if err != nil {
 			return nil, fmt.Errorf("line %d: 分支目标解析失败: %v", it.LineNo, err)
 		}
@@ -252,7 +252,7 @@ func assembleIType(it types.Item, instr types.Instruction, labels map[string]uin
 			return nil, fmt.Errorf("line %d: %s 需要 2 个操作数", it.LineNo, op)
 		}
 		rs := regs.RegOf(toks[1], it.LineNo)
-		off, err := branchOffset(toks[2], labels, addr)
+		off, err := branchOffset(toks[2], labels, addr, base)
 		if err != nil {
 			return nil, fmt.Errorf("line %d: 分支目标解析失败: %v", it.LineNo, err)
 		}
@@ -263,26 +263,29 @@ func assembleIType(it types.Item, instr types.Instruction, labels map[string]uin
 	return []uint32{word}, nil
 }
 
-func assembleJType(it types.Item, instr types.Instruction, labels map[string]uint32) ([]uint32, error) {
+func assembleJType(it types.Item, instr types.Instruction, labels map[string]uint32, base uint32) ([]uint32, error) {
 	toks := it.Tokens
 	if len(toks) < 2 {
 		return nil, fmt.Errorf("line %d: %s 需要目标标签或地址", it.LineNo, toks[0])
 	}
 	targetTok := toks[1]
 	targetAddr, ok := labels[targetTok]
-	if !ok {
-		v, err := parseNumber(targetTok, labels)
+	var targetAbs uint32
+	if ok {
+		targetAbs = base + targetAddr
+	} else {
+		v, err := parseNumber(targetTok, labels, base)
 		if err != nil {
 			return nil, fmt.Errorf("line %d: 未知跳转目标 %s", it.LineNo, targetTok)
 		}
-		targetAddr = v
+		targetAbs = v
 	}
-	field := (targetAddr >> 2) & 0x03ffffff
+	field := (targetAbs >> 2) & 0x03ffffff
 	word := (instr.Opcode << 26) | field
 	return []uint32{word}, nil
 }
 
-func assembleSpecial(it types.Item, labels map[string]uint32) ([]uint32, error) {
+func assembleSpecial(it types.Item, labels map[string]uint32, base uint32) ([]uint32, error) {
 	toks := it.Tokens
 	op := strings.ToLower(toks[0])
 
@@ -295,7 +298,7 @@ func assembleSpecial(it types.Item, labels map[string]uint32) ([]uint32, error) 
 			return nil, fmt.Errorf("line %d: li 需要两个操作数", it.LineNo)
 		}
 		rd := regs.RegOf(toks[1], it.LineNo)
-		imm32, err := parseNumber(toks[2], labels)
+		imm32, err := parseNumber(toks[2], labels, base)
 		if err != nil {
 			return nil, fmt.Errorf("line %d: li 立即数解析失败: %v", it.LineNo, err)
 		}
@@ -310,10 +313,10 @@ func assembleSpecial(it types.Item, labels map[string]uint32) ([]uint32, error) 
 	return nil, fmt.Errorf("line %d: 未知特殊指令 %s", it.LineNo, op)
 }
 
-func parseNumber(s string, labels map[string]uint32) (uint32, error) {
+func parseNumber(s string, labels map[string]uint32, base uint32) (uint32, error) {
 	s = strings.TrimSpace(s)
 	if v, ok := labels[s]; ok {
-		return v, nil
+		return base + v, nil
 	}
 	// hex
 	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
@@ -330,7 +333,7 @@ func parseNumber(s string, labels map[string]uint32) (uint32, error) {
 	return uint32(v), err
 }
 
-func parseOffsetBase(s string, labels map[string]uint32) (int32, int, error) {
+func parseOffsetBase(s string, labels map[string]uint32, base uint32) (int32, int, error) {
 	// 期望形如: 4($t0) 或 label($t0)
 	s = strings.TrimSpace(s)
 	if i := strings.Index(s, "("); i >= 0 {
@@ -345,7 +348,7 @@ func parseOffsetBase(s string, labels map[string]uint32) (int32, int, error) {
 			return 0, baseReg, nil
 		}
 		if v, ok := labels[offStr]; ok {
-			return int32(v), baseReg, nil
+			return int32(base + v), baseReg, nil
 		}
 		// 支持 0x.. 或 十进制或负数
 		if strings.HasPrefix(offStr, "0x") || strings.HasPrefix(offStr, "0X") {
@@ -358,11 +361,13 @@ func parseOffsetBase(s string, labels map[string]uint32) (int32, int, error) {
 	return 0, 0, fmt.Errorf("offset(base) 形式期望，但收到: %s", s)
 }
 
-func branchOffset(target string, labels map[string]uint32, curAddr uint32) (int32, error) {
+func branchOffset(target string, labels map[string]uint32, curAddr uint32, base uint32) (int32, error) {
 	// offset = (labelAddr - (curAddr + 4)) / 4
 	target = strings.TrimSpace(target)
 	if v, ok := labels[target]; ok {
-		offset := int32(v) - (int32(curAddr) + 4)
+		curAbs := int32(base + curAddr)
+		targetAbs := int32(base + v)
+		offset := targetAbs - (curAbs + 4)
 		return offset / 4, nil
 	}
 	// numeric
