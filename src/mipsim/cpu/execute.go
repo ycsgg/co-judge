@@ -188,7 +188,7 @@ func (c *CPU) Execute(instrHex uint32) ExecResult {
 	case 0x02: // j
 		c.NextPC = (c.PC & 0xF0000000) | (addr << 2)
 	case 0x03: // jal
-		c.Regs[31] = c.PC + 8
+		c.Regs[31] = c.PC + 4
 		c.NextPC = (c.PC & 0xF0000000) | (addr << 2)
 		res.RegWrite = true
 		res.RegDest = 31
