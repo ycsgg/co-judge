@@ -29,12 +29,13 @@ cd .\src
 # 1) 直接运行汇编器
 
 ```
-go run .\mips2hex -input .\mips2hex\test\code0.s -output .\out_instr.txt
+go run .\mips2hex -input .\mips2hex\test\code0.s -output .\out_instr.txt -base 0x3000
 ```
 
 # 上述命令说明：
 - `-input`：输入 MIPS 汇编源文件（支持 .text/.word、标签、li、常见指令等）
 - `-output`：输出每行 8 字节（32-bit）大写十六进制字符串（无 0x 前缀），由 `emitter.WriteHexLines` 生成
+- `-base`：指定 `.text` 段基址（十进制或 `0x..`）。分支与跳转会按该基址进行 PC 与目标地址计算。
 
 # 2) 反汇编单条或文件
 使用 hex2mips 可以对一个 hex 行或文件进行反汇编。
