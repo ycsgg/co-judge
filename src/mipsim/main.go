@@ -13,6 +13,7 @@ import (
 
 func main() {
 	fileFlag := flag.String("f", "", "hex instruction file (each line a 32-bit word, optionally 0x prefix)")
+	limitFlag := flag.Int("limit", 10000, "max execution steps (prevent infinite loop)")
 	flag.Parse()
 
 	if *fileFlag == "" {
@@ -48,5 +49,8 @@ func main() {
 	}
 
 	c := cpu.New()
+	if *limitFlag > 0 {
+		c.MaxSteps = *limitFlag
+	}
 	c.Run(instrs)
 }

@@ -171,7 +171,10 @@ func runMipsimLocal(hexPath string) ([]MipsLine, error) {
 		c.Mem[base+uint32(i*4)] = w
 	}
 	var out []MipsLine
-	for {
+	for step := 1; ; step++ {
+		if step > c.MaxSteps { // 使用 CPU 默认限制，避免评测卡死
+			break
+		}
 		idx := (c.PC - base) / 4
 		if idx >= uint32(len(instrs)) {
 			break

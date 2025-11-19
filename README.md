@@ -46,8 +46,13 @@ go run .\hex2mips -input .\out_instr.txt
 go run .\hex2mips -ih 0x012a4020
 ```
 # 3) 运行仿真器（mipsim）
+默认最大执行步数 10000（防止死循环），可用 `-limit` 覆盖。
 ```
 go run .\mipsim -f .\out_instr.txt
+```
+限制步数示例：
+```
+go run .\mipsim -f .\out_instr.txt -limit 500
 ```
 # 仿真器行为：
  - 从 PC 基址 0x3000 开始将指令装入内存（见 cpu.New 初始化）
