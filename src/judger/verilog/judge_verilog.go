@@ -100,6 +100,7 @@ func parseVerilogOutput(out string) []MipsLine {
 			if err != nil {
 				continue
 			}
+			var ml MipsLine
 			if strings.Contains(parts[1], "<=") {
 				subParts := strings.Split(parts[1], "<=")
 				if len(subParts) != 2 {
@@ -108,7 +109,7 @@ func parseVerilogOutput(out string) []MipsLine {
 				left := strings.TrimSpace(subParts[0])
 				right := strings.TrimSpace(subParts[1])
 				if strings.HasPrefix(left, "$") {
-					regDestStr := strings.TrimPrefix(left, "$")
+					regDestStr := strings.TrimPrefix(strings.TrimPrefix(left, "$"), " ")
 					regDest, err := strconv.ParseUint(regDestStr, 10, 32)
 					if err != nil {
 						continue
@@ -117,12 +118,12 @@ func parseVerilogOutput(out string) []MipsLine {
 					if err != nil {
 						continue
 					}
-					res = append(res, MipsLine{
+					ml = MipsLine{
 						PC:       uint32(pc),
 						RegWrite: true,
 						RegDest:  uint32(regDest),
 						RegData:  uint32(regData),
-					})
+					}
 				} else if strings.HasPrefix(left, "*") {
 					memAddrStr := strings.TrimPrefix(left, "*")
 					memAddr, err := strconv.ParseUint(memAddrStr, 16, 32)
@@ -133,14 +134,15 @@ func parseVerilogOutput(out string) []MipsLine {
 					if err != nil {
 						continue
 					}
-					res = append(res, MipsLine{
+					ml = MipsLine{
 						PC:       uint32(pc),
 						MemWrite: true,
 						MemAddr:  uint32(memAddr),
 						MemData:  uint32(memData),
-					})
+					}
 				}
 			}
+			res = append(res, ml)
 		}
 	}
 	return res
@@ -204,41 +206,73 @@ func runMipsimLocal(hexPath string) ([]MipsLine, error) {
 
 func compareTrace(verilogTrace []MipsLine, mipsimTrace []MipsLine) []string {
 	var diffs []string
-	var varilogTraceIdx, mipsimTraceIdx int
-	for varilogTraceIdx < len(verilogTrace) && mipsimTraceIdx < len(mipsimTrace) {
-		v := verilogTrace[varilogTraceIdx]
+	var verilogTraceIdx, mipsimTraceIdx int
+
+	for v := range verilogTrace {
+		fmt.Printf("Verilog Trace Line %d: PC=0x%08x RegWrite=%v RegDest=$%d RegData=0x%08x MemWrite=%v MemAddr=0x%08x MemData=0x%08x\n",
+			v+1,
+			verilogTrace[v].PC,
+			verilogTrace[v].RegWrite,
+			verilogTrace[v].RegDest,
+			verilogTrace[v].RegData,
+			verilogTrace[v].MemWrite,
+			verilogTrace[v].MemAddr,
+			verilogTrace[v].MemData,
+		)
+	}
+
+	fmt.Printf("<==============================>\n")
+
+	for m := range mipsimTrace {
+		fmt.Printf("MIPSIM Trace Line %d: PC=0x%08x RegWrite=%v RegDest=$%d RegData=0x%08x MemWrite=%v MemAddr=0x%08x MemData=0x%08x\n",
+			m+1,
+			mipsimTrace[m].PC,
+			mipsimTrace[m].RegWrite,
+			mipsimTrace[m].RegDest,
+			mipsimTrace[m].RegData,
+			mipsimTrace[m].MemWrite,
+			mipsimTrace[m].MemAddr,
+			mipsimTrace[m].MemData,
+		)
+	}
+
+	for verilogTraceIdx < len(verilogTrace) && mipsimTraceIdx < len(mipsimTrace) {
+		v := verilogTrace[verilogTraceIdx]
 		m := mipsimTrace[mipsimTraceIdx]
 
-		if !m.RegWrite && !m.MemWrite {
+		if (!m.RegWrite) && (!m.MemWrite) {
+			fmt.Printf("Skipping MIPSIM line with no RegWrite and no MemWrite in PC 0x%08x\n", m.PC)
 			mipsimTraceIdx++
 			continue
 		}
 
 		if v.PC != m.PC {
-			diffs = append(diffs, "PC mismatch at "+strconv.FormatUint(uint64(v.PC), 16))
+			diffs = append(diffs, fmt.Sprintf("line %d PC mismatch: verilog=0x%08x mipsim=0x%08x", verilogTraceIdx+1, v.PC, m.PC))
 		}
+
 		if v.RegWrite != m.RegWrite {
-			diffs = append(diffs, "RegWrite mismatch at PC "+strconv.FormatUint(uint64(v.PC), 16))
+			diffs = append(diffs, fmt.Sprintf("line %d RegWrite mismatch: verilog=%v mipsim=%v", verilogTraceIdx+1, v.RegWrite, m.RegWrite))
 		} else if v.RegWrite && m.RegWrite {
 			if v.RegDest != m.RegDest {
-				diffs = append(diffs, "RegDest mismatch at PC "+strconv.FormatUint(uint64(v.PC), 16))
+				diffs = append(diffs, fmt.Sprintf("line %d RegDest mismatch: verilog=$%d mipsim=$%d", verilogTraceIdx+1, v.RegDest, m.RegDest))
 			}
 			if v.RegData != m.RegData {
-				diffs = append(diffs, "RegData mismatch at PC "+strconv.FormatUint(uint64(v.PC), 16))
-			}
-		}
-		if v.MemWrite != m.MemWrite {
-			diffs = append(diffs, "MemWrite mismatch at PC "+strconv.FormatUint(uint64(v.PC), 16))
-		} else if v.MemWrite && m.MemWrite {
-			if v.MemAddr != m.MemAddr {
-				diffs = append(diffs, "MemAddr mismatch at PC "+strconv.FormatUint(uint64(v.PC), 16))
-			}
-			if v.MemData != m.MemData {
-				diffs = append(diffs, "MemData mismatch at PC "+strconv.FormatUint(uint64(v.PC), 16))
+				diffs = append(diffs, fmt.Sprintf("line %d RegData mismatch: verilog=0x%08x mipsim=0x%08x", verilogTraceIdx+1, v.RegData, m.RegData))
 			}
 		}
 
-		varilogTraceIdx++
+		if v.MemWrite != m.MemWrite {
+			diffs = append(diffs, fmt.Sprintf("line %d MemWrite mismatch: verilog=%v mipsim=%v", verilogTraceIdx+1, v.MemWrite, m.MemWrite))
+		} else if v.MemWrite && m.MemWrite {
+			if v.MemAddr != m.MemAddr {
+				diffs = append(diffs, fmt.Sprintf("line %d MemAddr mismatch: verilog=0x%08x mipsim=0x%08x", verilogTraceIdx+1, v.MemAddr, m.MemAddr))
+			}
+			if v.MemData != m.MemData {
+				diffs = append(diffs, fmt.Sprintf("line %d MemData mismatch: verilog=0x%08x mipsim=0x%08x", verilogTraceIdx+1, v.MemData, m.MemData))
+			}
+		}
+
+		verilogTraceIdx++
 		mipsimTraceIdx++
 	}
 	return diffs
