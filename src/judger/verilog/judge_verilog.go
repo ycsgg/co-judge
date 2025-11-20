@@ -2,10 +2,12 @@ package verilog
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -29,8 +31,12 @@ type JudgeResult struct {
 	MipsLines []MipsLine
 }
 
-func JudgeVerilog(isePath, verilogPath, hexPath string) (JudgeResult, error) {
-	verilogOut, err := runVerilog(isePath, verilogPath)
+func JudgeVerilog(isePath, verilogPath, prjPath, tbPath, tclPath, hexPath string) (JudgeResult, error) {
+	err := loadCode(verilogPath, hexPath)
+	if err != nil {
+		return JudgeResult{}, fmt.Errorf("load code failed: %w", err)
+	}
+	verilogOut, err := runVerilog(isePath, verilogPath, prjPath, tbPath, tclPath)
 	if err != nil {
 		return JudgeResult{}, fmt.Errorf("run verilog failed: %w", err)
 	}
@@ -61,18 +67,41 @@ func JudgeVerilog(isePath, verilogPath, hexPath string) (JudgeResult, error) {
 	}, nil
 }
 
-func runVerilog(isePath, verilogPath string) (string, error) {
-	var res strings.Builder
-	fmt.Printf("Input verilogOutput (-1 as Ended)\n")
-	reader := bufio.NewScanner(os.Stdin)
-	for reader.Scan() {
-		line := reader.Text()
-		if line == "-1" {
-			break
-		}
-		res.WriteString(line + "\n")
+func loadCode(verilogPath, codePath string) error {
+	data, err := os.ReadFile(codePath)
+	if err != nil {
+		return err
 	}
-	return res.String(), nil
+	err = os.WriteFile(verilogPath+string(os.PathSeparator)+"code.txt", data, 0644)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func runVerilog(isePath, verilogPath, prjPath, tbPath, tclPath string) (string, error) {
+	cmd1 := exec.Command("fuse", "-nodebug", "-prj", prjPath, "-o", "judge.exe", tbPath)
+	cmd1.Dir = verilogPath
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	cmd1.Stdout = &errOut
+	cmd1.Stderr = &errOut
+	err := cmd1.Run()
+	if err != nil {
+		return errOut.String(), fmt.Errorf("fuse command failed: %w\nOutput:\n%s", err, errOut.String())
+	}
+	cmd2 := exec.Command("./judge.exe", "-nolog", "-tclbatch", tclPath)
+	cmd2.Stdout = &out
+	cmd2.Stderr = &out
+	cmd2.Dir = verilogPath
+	err = cmd2.Run()
+	cmd3 := exec.Command("rm", "judge.exe")
+	cmd3.Dir = verilogPath
+	cmd3.Run()
+	if err != nil {
+		return out.String(), fmt.Errorf("verilog simulation failed: %w\nOutput:\n%s", err, out.String())
+	}
+	return out.String(), err
 }
 
 func parseVerilogOutput(out string) []MipsLine {
@@ -180,7 +209,10 @@ func runMipsimLocal(hexPath string) ([]MipsLine, error) {
 		c.Mem[base+uint32(i*4)] = w
 	}
 	var out []MipsLine
-	for {
+	for step := 1; ; step++ {
+		if step > c.MaxSteps { // 使用 CPU 默认限制，避免评测卡死
+			break
+		}
 		idx := (c.PC - base) / 4
 		if idx >= uint32(len(instrs)) {
 			break
@@ -203,38 +235,9 @@ func runMipsimLocal(hexPath string) ([]MipsLine, error) {
 	}
 	return out, nil
 }
-
 func compareTrace(verilogTrace []MipsLine, mipsimTrace []MipsLine) []string {
 	var diffs []string
 	var verilogTraceIdx, mipsimTraceIdx int
-
-	for v := range verilogTrace {
-		fmt.Printf("Verilog Trace Line %d: PC=0x%08x RegWrite=%v RegDest=$%d RegData=0x%08x MemWrite=%v MemAddr=0x%08x MemData=0x%08x\n",
-			v+1,
-			verilogTrace[v].PC,
-			verilogTrace[v].RegWrite,
-			verilogTrace[v].RegDest,
-			verilogTrace[v].RegData,
-			verilogTrace[v].MemWrite,
-			verilogTrace[v].MemAddr,
-			verilogTrace[v].MemData,
-		)
-	}
-
-	fmt.Printf("<==============================>\n")
-
-	for m := range mipsimTrace {
-		fmt.Printf("MIPSIM Trace Line %d: PC=0x%08x RegWrite=%v RegDest=$%d RegData=0x%08x MemWrite=%v MemAddr=0x%08x MemData=0x%08x\n",
-			m+1,
-			mipsimTrace[m].PC,
-			mipsimTrace[m].RegWrite,
-			mipsimTrace[m].RegDest,
-			mipsimTrace[m].RegData,
-			mipsimTrace[m].MemWrite,
-			mipsimTrace[m].MemAddr,
-			mipsimTrace[m].MemData,
-		)
-	}
 
 	for verilogTraceIdx < len(verilogTrace) && mipsimTraceIdx < len(mipsimTrace) {
 		v := verilogTrace[verilogTraceIdx]

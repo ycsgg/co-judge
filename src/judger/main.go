@@ -60,16 +60,19 @@ func main() {
 		fmt.Println("Mismatch found. See output and detail.log for details.")
 		os.Exit(1)
 	case "verilog":
-		if len(args) < 4 {
-			fmt.Fprintln(os.Stderr, "Usage: judger -mode verilog <ise_path> <verilog_path> <hex_path> <output_path>")
+		if len(args) < 7 {
+			fmt.Fprintln(os.Stderr, "Usage: judger -mode verilog <ise_path> <verilog_path> <prj_path> <tb_path> <tcl_path> <hex_path> <output_path>")
 			os.Exit(2)
 		}
 		ise := args[0]
-		vfile := args[1]
-		hex := args[2]
-		out := args[3]
+		verilogPath := args[1]
+		prjfile := args[2]
+		tbfile := args[3]
+		tclfile := args[4]
+		hex := args[5]
+		out := args[6]
 
-		res, err := verilog.JudgeVerilog(ise, vfile, hex)
+		res, err := verilog.JudgeVerilog(ise, verilogPath, prjfile, tbfile, tclfile, hex)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Judge error:", err)
 			os.Exit(1)
